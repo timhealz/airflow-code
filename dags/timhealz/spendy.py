@@ -3,6 +3,7 @@ import json
 import logging
 import mintapi
 import os
+import airflow.macros as macros
 
 from decimal import Decimal
 from re import sub
@@ -11,13 +12,12 @@ from typing import Dict
 from airflow import DAG
 from airflow.decorators import task
 from airflow.hooks.base import BaseHook
-from airflow.macros import ds_format
 from airflow.models import Variable
 from airflow.providers.mysql.operators.mysql import MySqlOperator
 
 from sqlalchemy.orm import sessionmaker
 
-from timhealz.common.utils import get_mysql_db_engine
+from timhealz.common.utils import get_mysql_db_engine, mint_date_to_ds
 from timhealz.common.data_models.spendy import Transaction
 
 log = logging.getLogger(__name__)
@@ -90,17 +90,26 @@ with DAG(
             use_chromedriver_on_path=True,
         )
 
-        mint_ds = ds_format(ds, "%Y-%m-%d", "%m/%d/%y")
+        start_ds = macros.ds_add(ds, -7)
+        
+        mint_start_date = macros.ds_format(start_ds, "%Y-%m-%d", "%m/%d/%y")
+        mint_end_date = macros.ds_format(ds, "%Y-%m-%d", "%m/%d/%y")
 
         log.info("Getting transactions")
-        data = mint.get_transactions_json(
-            start_date=mint_ds, end_date=mint_ds
+        transactions_json = mint.get_transactions_json(
+            start_date=mint_start_date, end_date=mint_end_date
         )
+        
+        transactions = {}
+        for transaction in transactions_json:
+            ds = mint_date_to_ds(transaction["date"])
+            transactions.setdefault(ds,[]).append(transaction)
 
-        fp = TRANSACTIONS_FP.format(ds=ds)
-        log.info(f"Dumping transactions json to {fp}")
-        with open(fp, "w") as out:
-            json.dump(data, out, indent=4)
+        log.info(f"Dumping transactions json for {mint_start_date} - {mint_end_date}")
+        for ds, ds_transactions in transactions.items():
+            fp = TRANSACTIONS_FP.format(ds=ds)    
+            with open(fp, "w") as out:
+                json.dump(ds_transactions, out, indent=4)
 
     get_mint_transactions = get_mint_transactions()
 
@@ -111,7 +120,7 @@ with DAG(
         sql="""
         DELETE FROM spendy.mint_transactions
         WHERE
-            ds = '{{ ds }}';
+            ds BETWEEN '{{ macros.ds_add(ds, -6) }}' AND '{{ ds }}';
         """,
     )
 
@@ -121,17 +130,21 @@ with DAG(
     @task(task_id="db_insert_mint_transactions")
     def insert_mint_transactions(ds=None, **kwargs):
 
-        fp = TRANSACTIONS_FP.format(ds=ds)
-        with open(fp, "r") as f:
-            transactions = json.load(f)
-
         Session = sessionmaker(bind=get_mysql_db_engine())
         session = Session()
 
-        log.info(f"Loading transactions")
-        for transaction in transactions:
-            log.info(transaction)
-            session.add(parse_transaction(transaction=transaction, ds=ds))
+        i_ds = ds
+        for i in range(0, 7):
+            i_ds = macros.ds_add(ds, -i)
+        
+            fp = TRANSACTIONS_FP.format(ds=i_ds)
+            with open(fp, "r") as f:
+                transactions = json.load(f)
+
+            log.info(f"Loading transactions - {i_ds}")
+            for transaction in transactions:
+                log.info(transaction)
+                session.add(parse_transaction(transaction=transaction, ds=i_ds))
 
         session.commit()
     
