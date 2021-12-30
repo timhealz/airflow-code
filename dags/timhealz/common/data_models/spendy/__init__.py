@@ -1,0 +1,1 @@
+from timhealz.common.data_models.spendy.transaction import Transaction
