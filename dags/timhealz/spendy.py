@@ -18,7 +18,7 @@ from airflow.providers.mysql.operators.mysql import MySqlOperator
 from sqlalchemy.orm import sessionmaker
 
 from timhealz.common.utils import get_mysql_db_engine, mint_date_to_ds
-from timhealz.common.data_models.spendy import Transaction
+from tars_data_models.spendy import Transaction
 
 log = logging.getLogger(__name__)
 
