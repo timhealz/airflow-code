@@ -105,9 +105,10 @@ with DAG(
             ds = mint_date_to_ds(transaction["date"])
             transactions.setdefault(ds,[]).append(transaction)
 
-        log.info(f"Dumping transactions json for {mint_start_date} - {mint_end_date}")
         for ds, ds_transactions in transactions.items():
-            fp = TRANSACTIONS_FP.format(ds=ds)    
+            fp = TRANSACTIONS_FP.format(ds=ds)
+            log.info(f"Dumping transactions json: {fp}")
+
             with open(fp, "w") as out:
                 json.dump(ds_transactions, out, indent=4)
 
